@@ -38,6 +38,9 @@
     "tar-stream": "^1.5.4",
     "webtorrent": "^0.98.18"
   },
+  "engines": {
+    "node": "^7"
+  },
   "watch": {
     "start": "src/*.js"
   }
