@@ -1,6 +1,8 @@
+import bytes from 'bytes'
 import express from 'express'
 import jsesc from 'jsesc'
 import log from 'fancy-log'
+import pump from 'pump'
 import streamToPromise from 'stream-to-promise'
 import tar from 'tar-stream'
 import WebTorrent from 'webtorrent'
@@ -42,16 +44,36 @@ app.get('/torrent/:infohash', (req, res) => {
 
 app.get('/torrent/:infohash/:index([0-9]+)', (req, res) => {
   req.params.index = Number(req.params.index)
-  if (req.torrent.files.length <= req.params.index) {
-    res.sendStatus(404)
-  } else {
-    const file = req.torrent.files[req.params.index]
-    res.contentType(file.name.split('.').pop())
+  if (req.params.index >= req.torrent.files.length) return res.sendStatus(404)
+  res.set('Accept-Ranges', 'bytes')
+  const file = req.torrent.files[req.params.index]
+  res.type(file.name.split('.').pop())
+  res.set('X-Torrent-Peers', req.torrent.numPeers)
+  res.set('X-Torrent-DownloadSpeed', `${bytes(req.torrent.downloadSpeed)}/sec`)
+  res.set('X-Torrent-UploadSpeed', `${bytes(req.torrent.uploadSpeed)}/sec`)
+  res.set('X-Torrent-Received', bytes(req.torrent.received))
+  res.set('X-Torrent-Downloaded', bytes(req.torrent.downloaded))
+  if (req.query.dl !== '0') {
     res.set('Content-Disposition', `attachment; filename="${jsesc(file.name)}"`)
-    res.set('Content-Length', file.length)
-    res.writeHead(200)
-    file.createReadStream().pipe(res)
   }
+  if (req.headers.range) {
+    let range = req.range(file.length)
+    if (range === -2) return res.sendStatus(400)
+    if (range === -1) return res.sendStatus(416)
+    if (range.type !== 'bytes') return res.sendStatus(416)
+    if (range.length !== 1) return res.sendStatus(416)
+    range = range[0]
+    res.status(206)
+    res.setHeader(
+      'Content-Range',
+      `bytes ${range.start}-${range.end}/${file.length}`,
+    )
+    pump(file.createReadStream(range), res)
+  } else {
+    res.set('Content-Length', file.length)
+    pump(file.createReadStream(), res)
+  }
+  return undefined
 })
 
 app.get('/torrent/:infohash/tar', async (req, res) => {
