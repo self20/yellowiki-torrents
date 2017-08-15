@@ -1,7 +1,10 @@
+import bencode from 'bencode'
 import bytes from 'bytes'
 import express from 'express'
+import morgan from 'morgan'
 import jsesc from 'jsesc'
 import log from 'fancy-log'
+import parseTorrent from 'parse-torrent'
 import pump from 'pump'
 import streamToPromise from 'stream-to-promise'
 import tar from 'tar-stream'
@@ -18,6 +21,8 @@ const trackers = [
 const client = WebTorrent()
 
 const app = express()
+
+app.use(morgan('short'))
 
 app.get('/', (req, res) => res.send('Yellowiki Torrents API endpoint'))
 
@@ -42,7 +47,7 @@ app.get('/torrent/:infohash', (req, res) => {
   res.json(req.torrent.files.map(x => x.path))
 })
 
-app.get('/torrent/:infohash/:index([0-9]+)', (req, res) => {
+function downloadTorrentFile(req, res) {
   req.params.index = Number(req.params.index)
   if (req.params.index >= req.torrent.files.length) return res.sendStatus(404)
   res.set('Accept-Ranges', 'bytes')
@@ -74,6 +79,41 @@ app.get('/torrent/:infohash/:index([0-9]+)', (req, res) => {
     pump(file.createReadStream(), res)
   }
   return undefined
+}
+
+app.get('/torrent/:infohash/:index([0-9]+)', (req, res) => {
+  downloadTorrentFile(req, res)
+})
+
+app.get('/torrent/:infohash/safefile', (req, res) => {
+  const parsed = parseTorrent(req.torrent.torrentFile)
+  parsed.announce = []
+  parsed.info.private = true
+  parsed.urlList = [
+    `${process.env.WEBSEED_ROOT}/${req.params.infohash}`,
+  ]
+  parsed.comment = 'Safe torrent from Yellowiki Torrents'
+  const buffer = parseTorrent.toTorrentFile(parsed)
+  const decoded = bencode.decode(buffer)
+  const encoded = bencode.encode(decoded)
+  res.type('torrent')
+  res.set('Content-Disposition', `attachment; filename="${req.torrent.infoHash}.torrent"`)
+  res.send(encoded)
+})
+
+
+app.get('/webseed/:infohash/:torrentname/:filename', (req, res) => {
+  req.params.index = req.torrent.files.findIndex(x => x.name === req.params.filename)
+  downloadTorrentFile(req, res)
+})
+
+app.get('/webseed/:infohash', (req, res) => {
+  if (req.torrent.files.length === 1) {
+    req.params.index = 0
+    downloadTorrentFile(req, res)
+  } else {
+    res.send('Torrent web seed')
+  }
 })
 
 app.get('/torrent/:infohash/tar', async (req, res) => {
