@@ -102,9 +102,10 @@ app.get('/torrent/:infohash/safefile', (req, res) => {
 })
 
 
-app.get('/webseed/:infohash/:torrentname/:filename', (req, res) => {
-  req.params.index = req.torrent.files.findIndex(x => x.name === req.params.filename)
-  downloadTorrentFile(req, res)
+app.get('/webseed/:infohash/:torrentname/:filename*', (req, res) => {
+  req.params.index = req.torrent.files.findIndex(x => x.path === req.params.filename)
+  if (req.params.index < 0) return res.sendStatus(404)
+  return downloadTorrentFile(req, res)
 })
 
 app.get('/webseed/:infohash', (req, res) => {
